@@ -2,6 +2,69 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+<!-- ═══ ANTI-FLICKER AUTH GUARD — runs before body paints ═══ -->
+  <script>
+    (function() {
+      // Hide body immediately — nothing renders until we decide
+      document.documentElement.style.visibility = 'hidden';
+
+      var token = localStorage.getItem('qa_token');
+      var role  = localStorage.getItem('qa_role');
+      // Normalise superadmin → admin
+      if (role === 'superadmin') role = 'admin';
+
+      var path = window.location.pathname;
+      // Depth-aware base path (works on GitHub Pages subfolders)
+      var parts = path.split('/').filter(Boolean);
+      // Remove repo name if on GitHub Pages (first segment after domain)
+      var depth = parts.length;
+      var base  = depth > 1 ? '../'.repeat(depth - 1) : './';
+
+      var dashboards = {
+        admin:   base + 'admin/dashboard.html',
+        teacher: base + 'teacher/dashboard.html',
+        student: base + 'student/dashboard.html'
+      };
+
+      var isProtectedAdmin   = path.indexOf('/admin/')   !== -1;
+      var isProtectedTeacher = path.indexOf('/teacher/') !== -1;
+      var isProtectedStudent = path.indexOf('/student/') !== -1;
+      var isIndexPage = !isProtectedAdmin && !isProtectedTeacher && !isProtectedStudent;
+
+      if (!token) {
+        // Not logged in
+        if (isProtectedAdmin || isProtectedTeacher || isProtectedStudent) {
+          // Kick to login immediately — before any render
+          window.location.replace(base + 'index.html');
+          return; // never reveal body
+        }
+        // On index/register/quran — fine, reveal
+      } else {
+        // Logged in
+        if (isIndexPage && path.indexOf('register') === -1 && path.indexOf('quran') === -1) {
+          // On login page but already logged in — redirect to dashboard
+          window.location.replace(dashboards[role] || base + 'index.html');
+          return;
+        }
+        // On wrong role's page
+        if (isProtectedAdmin   && role !== 'admin')   { window.location.replace(dashboards[role] || base + 'index.html'); return; }
+        if (isProtectedTeacher && role !== 'teacher') { window.location.replace(dashboards[role] || base + 'index.html'); return; }
+        if (isProtectedStudent && role !== 'student') { window.location.replace(dashboards[role] || base + 'index.html'); return; }
+      }
+
+      // All checks passed — reveal the page with smooth fade-in
+      document.documentElement.style.visibility = 'visible';
+      // After DOM is ready, remove dark overlay
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+          document.body.classList.add('qa-loaded');
+        });
+      } else {
+        document.body.classList.add('qa-loaded');
+      }
+    })();
+  </script>
+  <!-- ═══ END ANTI-FLICKER GUARD ═══ -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Schedule — Quran Academy Admin</title>
   <link rel="stylesheet" href="../css/main.css" />

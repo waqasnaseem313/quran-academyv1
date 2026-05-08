@@ -1187,3 +1187,35 @@ img { max-width: 100%; display: block; }
 .font-display { font-family: var(--font-display); }
 .hidden { display: none !important; }
 .rtl { direction: rtl; }
+
+/* ── Anti-Flicker Page Reveal ────────────────────────────
+   The inline guard script hides html immediately.
+   Once auth passes, visibility is restored.
+   This adds a smooth fade-in on reveal.                  */
+html {
+  /* Fallback: if JS hasn't hidden it yet, still invisible
+     for one frame to prevent flash */
+  transition: opacity 0.18s ease;
+}
+
+html.qa-page-ready {
+  opacity: 1;
+}
+
+/* Loading shimmer for auth-protected pages while
+   the guard script is evaluating                        */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: var(--dark, #0A1628);
+  z-index: 99999;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.2s ease 0.05s;
+}
+
+body.qa-loaded::before {
+  opacity: 0;
+  pointer-events: none;
+}
