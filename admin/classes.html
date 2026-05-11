@@ -2,69 +2,60 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-<!-- ═══ ANTI-FLICKER AUTH GUARD — runs before body paints ═══ -->
+<!-- ═══ ANTI-FLICKER AUTH GUARD ═══ -->
   <script>
     (function() {
-      // Hide body immediately — nothing renders until we decide
       document.documentElement.style.visibility = 'hidden';
-
       var token = localStorage.getItem('qa_token');
       var role  = localStorage.getItem('qa_role');
-      // Normalise superadmin → admin
       if (role === 'superadmin') role = 'admin';
 
       var path = window.location.pathname;
-      // Depth-aware base path (works on GitHub Pages subfolders)
-      var parts = path.split('/').filter(Boolean);
-      // Remove repo name if on GitHub Pages (first segment after domain)
-      var depth = parts.length;
-      var base  = depth > 1 ? '../'.repeat(depth - 1) : './';
 
-      var dashboards = {
-        admin:   base + 'admin/dashboard.html',
-        teacher: base + 'teacher/dashboard.html',
-        student: base + 'student/dashboard.html'
+      // Works on GitHub Pages (/repo-name/admin/page.html)
+      // and custom domains (/admin/page.html) equally
+      var isAdmin   = /\/admin\//i.test(path);
+      var isTeacher = /\/teacher\//i.test(path);
+      var isStudent = /\/student\//i.test(path);
+      var isRoot    = !isAdmin && !isTeacher && !isStudent;
+
+      // Resolve relative base regardless of nesting depth
+      function base() {
+        if (isAdmin || isTeacher || isStudent) return '../';
+        return './';
+      }
+
+      var dst = {
+        admin:   base() + 'admin/dashboard.html',
+        teacher: base() + 'teacher/dashboard.html',
+        student: base() + 'student/dashboard.html'
       };
 
-      var isProtectedAdmin   = path.indexOf('/admin/')   !== -1;
-      var isProtectedTeacher = path.indexOf('/teacher/') !== -1;
-      var isProtectedStudent = path.indexOf('/student/') !== -1;
-      var isIndexPage = !isProtectedAdmin && !isProtectedTeacher && !isProtectedStudent;
+      function redirect(url) { window.location.replace(url); }
 
       if (!token) {
-        // Not logged in
-        if (isProtectedAdmin || isProtectedTeacher || isProtectedStudent) {
-          // Kick to login immediately — before any render
-          window.location.replace(base + 'index.html');
-          return; // never reveal body
-        }
-        // On index/register/quran — fine, reveal
+        if (!isRoot) { redirect(base() + 'index.html'); return; }
       } else {
-        // Logged in
-        if (isIndexPage && path.indexOf('register') === -1 && path.indexOf('quran') === -1) {
-          // On login page but already logged in — redirect to dashboard
-          window.location.replace(dashboards[role] || base + 'index.html');
-          return;
+        // Logged in on login page → go to dashboard
+        if (isRoot && path.indexOf('register') === -1 && path.indexOf('quran') === -1) {
+          redirect(dst[role] || base() + 'index.html'); return;
         }
-        // On wrong role's page
-        if (isProtectedAdmin   && role !== 'admin')   { window.location.replace(dashboards[role] || base + 'index.html'); return; }
-        if (isProtectedTeacher && role !== 'teacher') { window.location.replace(dashboards[role] || base + 'index.html'); return; }
-        if (isProtectedStudent && role !== 'student') { window.location.replace(dashboards[role] || base + 'index.html'); return; }
+        // classroom.html in /student/ is shared with teacher+admin
+        var isClassroom = path.indexOf('classroom') !== -1;
+        if (isStudent && !isClassroom && role !== 'student') { redirect(dst[role]||base()+'index.html'); return; }
+        if (isStudent &&  isClassroom && role!=='student'&&role!=='teacher'&&role!=='admin') { redirect(base()+'index.html'); return; }
+        if (isTeacher && role !== 'teacher') { redirect(dst[role]||base()+'index.html'); return; }
+        if (isAdmin   && role !== 'admin')   { redirect(dst[role]||base()+'index.html'); return; }
       }
 
-      // All checks passed — reveal the page with smooth fade-in
+      // Passed — reveal
       document.documentElement.style.visibility = 'visible';
-      // After DOM is ready, remove dark overlay
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-          document.body.classList.add('qa-loaded');
-        });
-      } else {
-        document.body.classList.add('qa-loaded');
-      }
+        document.addEventListener('DOMContentLoaded', function(){ document.body.classList.add('qa-loaded'); });
+      } else { document.body.classList.add('qa-loaded'); }
     })();
   </script>
-  <!-- ═══ END ANTI-FLICKER GUARD ═══ -->
+  <!-- ═══ END GUARD ═══ -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Classes — Quran Academy Admin</title>
   <link rel="stylesheet" href="../css/main.css" />
@@ -349,8 +340,10 @@
         <div class="qa-form-grid">
           <div class="qa-form-group">
             <label class="qa-label">Start Time (UTC)<span class="required">*</span></label>
-            <input type="time" id="fTimeUTC" class="qa-input" />
-            <div style="font-size:0.7rem;color:var(--teal-300);margin-top:4px;" id="localTimePreview">Local time preview will appear here</div>
+            <select id="fTimeUTC" class="qa-select">
+              <option value="">Select class time...</option>
+            </select>
+            <div style="font-size:0.7rem;color:var(--teal-200);margin-top:5px;">⏰ Times are local to your location</div>
           </div>
           <div class="qa-form-group">
             <label class="qa-label">Duration (minutes)<span class="required">*</span></label>
@@ -488,7 +481,7 @@
           <div class="qa-cls-card__subj">${SUBJ_ICONS[c.Subject]||'📚'} ${Utils.sanitize(c.Subject)}</div>
           <div class="qa-cls-card__name">${Utils.sanitize(c.ClassName)}</div>
           <div class="qa-cls-card__meta">👨‍🏫 ${Utils.sanitize(c.TeacherName||'No teacher assigned')}</div>
-          <div class="qa-cls-card__meta">📅 ${Utils.daysDisplay(c.DaysOfWeek)} · ⏰ ${Utils.utcToLocal(c.TimeUTC)}</div>
+          <div class="qa-cls-card__meta">📅 ${Utils.daysDisplay(c.DaysOfWeek)} · ⏰ ${Utils.formatClassTime(c.TimeUTC)}</div>
           <div class="qa-cls-card__meta">⏱ ${c.DurationMins} min · 👥 Max ${c.MaxStudents}</div>
           <div class="qa-cls-card__room">
             Room: <strong style="color:var(--gold-400);letter-spacing:0.1em;">${c.MeetingRoomCode||'—'}</strong>
@@ -512,7 +505,7 @@
           <td><span class="qa-badge qa-badge--active" style="font-size:0.65rem;">${Utils.sanitize(c.Subject)}</span></td>
           <td>${Utils.sanitize(c.TeacherName||'—')}</td>
           <td class="text-sm">${Utils.daysDisplay(c.DaysOfWeek)}</td>
-          <td class="text-sm">${Utils.utcToLocal(c.TimeUTC)}</td>
+          <td class="text-sm">${Utils.formatClassTime(c.TimeUTC)}</td>
           <td>${c.MaxStudents}</td>
           <td style="font-family:monospace;font-size:0.78rem;color:var(--gold-400);">${c.MeetingRoomCode||'—'}</td>
           <td><span class="qa-badge qa-badge--${c.Status==='Active'?'active':'rejected'}">${c.Status}</span></td>
@@ -564,19 +557,7 @@
       });
     }
 
-    // ── Local time preview ─────────────────────────────────
-    document.addEventListener('DOMContentLoaded', () => {});
-    function updateTimePreview() {
-      const t = document.getElementById('fTimeUTC').value;
-      if (!t) return;
-      const preview = Utils.utcToLocal(t);
-      document.getElementById('localTimePreview').textContent = '🕐 Your local time: ' + preview;
-    }
-    // Attach after DOM
-    setTimeout(() => {
-      const t = document.getElementById('fTimeUTC');
-      if (t) t.addEventListener('input', updateTimePreview);
-    }, 100);
+    // Time dropdown populated from Utils.TIME_SLOTS
 
     // ── Room code ──────────────────────────────────────────
     function genRoomCode() {
@@ -593,6 +574,7 @@
       document.getElementById('fSubject').value = '';
       document.getElementById('fTeacher').value = '';
       document.getElementById('fTimeUTC').value = '';
+      Utils.populateTimeSelect(document.getElementById('fTimeUTC'));
       document.getElementById('fDuration').value = '60';
       document.getElementById('fMaxStudents').value = '20';
       document.getElementById('fBackupLink').value = '';
@@ -612,7 +594,7 @@
       document.getElementById('editClassId').value = classId;
       document.getElementById('fClassName').value = c.ClassName || '';
       document.getElementById('fTeacher').value   = c.TeacherID || '';
-      document.getElementById('fTimeUTC').value   = c.TimeUTC || '';
+      Utils.populateTimeSelect(document.getElementById('fTimeUTC'), c.TimeUTC || '');
       document.getElementById('fDuration').value  = c.DurationMins || '60';
       document.getElementById('fMaxStudents').value = c.MaxStudents || '20';
       document.getElementById('fBackupLink').value = c.BackupLink || '';
@@ -621,7 +603,6 @@
       setSelectedDays(Utils.parseDays(c.DaysOfWeek));
       setSubject(c.Subject || '');
       document.getElementById('roomCodePreview').textContent = c.MeetingRoomCode || '—';
-      updateTimePreview();
       document.getElementById('classModal').style.display = 'flex';
     }
 
@@ -640,7 +621,7 @@
       const errors = [];
       if (!name)    errors.push('Class name is required.');
       if (!subject) errors.push('Please select a subject.');
-      if (!time)    errors.push('Start time is required.');
+      if (!time)    errors.push('Please select a class time.');
       if (!selectedDays.length) errors.push('Please select at least one class day.');
 
       if (errors.length) {
@@ -768,6 +749,8 @@
       m.addEventListener('click', e => { if (e.target === m) m.style.display = 'none'; });
     });
 
+    // Populate time dropdowns on load
+    Utils.populateTimeSelect(document.getElementById('fTimeUTC'));
     loadData();
   </script>
 </body>

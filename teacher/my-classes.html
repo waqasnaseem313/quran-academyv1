@@ -2,69 +2,60 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-<!-- ═══ ANTI-FLICKER AUTH GUARD — runs before body paints ═══ -->
+<!-- ═══ ANTI-FLICKER AUTH GUARD ═══ -->
   <script>
     (function() {
-      // Hide body immediately — nothing renders until we decide
       document.documentElement.style.visibility = 'hidden';
-
       var token = localStorage.getItem('qa_token');
       var role  = localStorage.getItem('qa_role');
-      // Normalise superadmin → admin
       if (role === 'superadmin') role = 'admin';
 
       var path = window.location.pathname;
-      // Depth-aware base path (works on GitHub Pages subfolders)
-      var parts = path.split('/').filter(Boolean);
-      // Remove repo name if on GitHub Pages (first segment after domain)
-      var depth = parts.length;
-      var base  = depth > 1 ? '../'.repeat(depth - 1) : './';
 
-      var dashboards = {
-        admin:   base + 'admin/dashboard.html',
-        teacher: base + 'teacher/dashboard.html',
-        student: base + 'student/dashboard.html'
+      // Works on GitHub Pages (/repo-name/admin/page.html)
+      // and custom domains (/admin/page.html) equally
+      var isAdmin   = /\/admin\//i.test(path);
+      var isTeacher = /\/teacher\//i.test(path);
+      var isStudent = /\/student\//i.test(path);
+      var isRoot    = !isAdmin && !isTeacher && !isStudent;
+
+      // Resolve relative base regardless of nesting depth
+      function base() {
+        if (isAdmin || isTeacher || isStudent) return '../';
+        return './';
+      }
+
+      var dst = {
+        admin:   base() + 'admin/dashboard.html',
+        teacher: base() + 'teacher/dashboard.html',
+        student: base() + 'student/dashboard.html'
       };
 
-      var isProtectedAdmin   = path.indexOf('/admin/')   !== -1;
-      var isProtectedTeacher = path.indexOf('/teacher/') !== -1;
-      var isProtectedStudent = path.indexOf('/student/') !== -1;
-      var isIndexPage = !isProtectedAdmin && !isProtectedTeacher && !isProtectedStudent;
+      function redirect(url) { window.location.replace(url); }
 
       if (!token) {
-        // Not logged in
-        if (isProtectedAdmin || isProtectedTeacher || isProtectedStudent) {
-          // Kick to login immediately — before any render
-          window.location.replace(base + 'index.html');
-          return; // never reveal body
-        }
-        // On index/register/quran — fine, reveal
+        if (!isRoot) { redirect(base() + 'index.html'); return; }
       } else {
-        // Logged in
-        if (isIndexPage && path.indexOf('register') === -1 && path.indexOf('quran') === -1) {
-          // On login page but already logged in — redirect to dashboard
-          window.location.replace(dashboards[role] || base + 'index.html');
-          return;
+        // Logged in on login page → go to dashboard
+        if (isRoot && path.indexOf('register') === -1 && path.indexOf('quran') === -1) {
+          redirect(dst[role] || base() + 'index.html'); return;
         }
-        // On wrong role's page
-        if (isProtectedAdmin   && role !== 'admin')   { window.location.replace(dashboards[role] || base + 'index.html'); return; }
-        if (isProtectedTeacher && role !== 'teacher') { window.location.replace(dashboards[role] || base + 'index.html'); return; }
-        if (isProtectedStudent && role !== 'student') { window.location.replace(dashboards[role] || base + 'index.html'); return; }
+        // classroom.html in /student/ is shared with teacher+admin
+        var isClassroom = path.indexOf('classroom') !== -1;
+        if (isStudent && !isClassroom && role !== 'student') { redirect(dst[role]||base()+'index.html'); return; }
+        if (isStudent &&  isClassroom && role!=='student'&&role!=='teacher'&&role!=='admin') { redirect(base()+'index.html'); return; }
+        if (isTeacher && role !== 'teacher') { redirect(dst[role]||base()+'index.html'); return; }
+        if (isAdmin   && role !== 'admin')   { redirect(dst[role]||base()+'index.html'); return; }
       }
 
-      // All checks passed — reveal the page with smooth fade-in
+      // Passed — reveal
       document.documentElement.style.visibility = 'visible';
-      // After DOM is ready, remove dark overlay
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-          document.body.classList.add('qa-loaded');
-        });
-      } else {
-        document.body.classList.add('qa-loaded');
-      }
+        document.addEventListener('DOMContentLoaded', function(){ document.body.classList.add('qa-loaded'); });
+      } else { document.body.classList.add('qa-loaded'); }
     })();
   </script>
-  <!-- ═══ END ANTI-FLICKER GUARD ═══ -->
+  <!-- ═══ END GUARD ═══ -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>My Classes — Quran Academy Teacher</title>
   <link rel="stylesheet" href="../css/main.css" />
@@ -255,7 +246,7 @@
       grid.innerHTML = myClasses.map(cls => {
         const days       = Utils.parseDays(cls.DaysOfWeek);
         const isToday    = days.includes(todayDay);
-        const timeStr    = Utils.utcToLocal(cls.TimeUTC);
+        const timeStr    = Utils.formatClassTime(cls.TimeUTC);
         const timeUntil  = isToday ? Utils.timeUntilClass(cls.TimeUTC, cls.DaysOfWeek) : null;
         const isLive     = timeUntil === 'Starting now!' || (timeUntil && parseInt(timeUntil) <= 15);
         const stuList    = enrollments[cls.ClassID] || [];
@@ -318,7 +309,7 @@
           <div style="display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
             <div style="flex:1;">
               <div style="font-family:var(--font-ui);font-weight:500;color:var(--cream);">${Utils.sanitize(cls.ClassName)}</div>
-              <div style="font-size:0.75rem;color:var(--teal-200);">${Utils.utcToLocal(cls.TimeUTC)} · ${cls.DurationMins} min · ${enrollments[cls.ClassID]?.length || 0} students</div>
+              <div style="font-size:0.75rem;color:var(--teal-200);">${Utils.formatClassTime(cls.TimeUTC)} · ${cls.DurationMins} min · ${enrollments[cls.ClassID]?.length || 0} students</div>
             </div>
             <div style="font-size:0.78rem;color:var(--green-lt);font-family:var(--font-ui);">${timeUntil || ''}</div>
             <a href="../student/classroom.html?room=${cls.MeetingRoomCode}&class=${cls.ClassID}&name=${encodeURIComponent(cls.ClassName)}"

@@ -2,69 +2,60 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-<!-- ═══ ANTI-FLICKER AUTH GUARD — runs before body paints ═══ -->
+<!-- ═══ ANTI-FLICKER AUTH GUARD ═══ -->
   <script>
     (function() {
-      // Hide body immediately — nothing renders until we decide
       document.documentElement.style.visibility = 'hidden';
-
       var token = localStorage.getItem('qa_token');
       var role  = localStorage.getItem('qa_role');
-      // Normalise superadmin → admin
       if (role === 'superadmin') role = 'admin';
 
       var path = window.location.pathname;
-      // Depth-aware base path (works on GitHub Pages subfolders)
-      var parts = path.split('/').filter(Boolean);
-      // Remove repo name if on GitHub Pages (first segment after domain)
-      var depth = parts.length;
-      var base  = depth > 1 ? '../'.repeat(depth - 1) : './';
 
-      var dashboards = {
-        admin:   base + 'admin/dashboard.html',
-        teacher: base + 'teacher/dashboard.html',
-        student: base + 'student/dashboard.html'
+      // Works on GitHub Pages (/repo-name/admin/page.html)
+      // and custom domains (/admin/page.html) equally
+      var isAdmin   = /\/admin\//i.test(path);
+      var isTeacher = /\/teacher\//i.test(path);
+      var isStudent = /\/student\//i.test(path);
+      var isRoot    = !isAdmin && !isTeacher && !isStudent;
+
+      // Resolve relative base regardless of nesting depth
+      function base() {
+        if (isAdmin || isTeacher || isStudent) return '../';
+        return './';
+      }
+
+      var dst = {
+        admin:   base() + 'admin/dashboard.html',
+        teacher: base() + 'teacher/dashboard.html',
+        student: base() + 'student/dashboard.html'
       };
 
-      var isProtectedAdmin   = path.indexOf('/admin/')   !== -1;
-      var isProtectedTeacher = path.indexOf('/teacher/') !== -1;
-      var isProtectedStudent = path.indexOf('/student/') !== -1;
-      var isIndexPage = !isProtectedAdmin && !isProtectedTeacher && !isProtectedStudent;
+      function redirect(url) { window.location.replace(url); }
 
       if (!token) {
-        // Not logged in
-        if (isProtectedAdmin || isProtectedTeacher || isProtectedStudent) {
-          // Kick to login immediately — before any render
-          window.location.replace(base + 'index.html');
-          return; // never reveal body
-        }
-        // On index/register/quran — fine, reveal
+        if (!isRoot) { redirect(base() + 'index.html'); return; }
       } else {
-        // Logged in
-        if (isIndexPage && path.indexOf('register') === -1 && path.indexOf('quran') === -1) {
-          // On login page but already logged in — redirect to dashboard
-          window.location.replace(dashboards[role] || base + 'index.html');
-          return;
+        // Logged in on login page → go to dashboard
+        if (isRoot && path.indexOf('register') === -1 && path.indexOf('quran') === -1) {
+          redirect(dst[role] || base() + 'index.html'); return;
         }
-        // On wrong role's page
-        if (isProtectedAdmin   && role !== 'admin')   { window.location.replace(dashboards[role] || base + 'index.html'); return; }
-        if (isProtectedTeacher && role !== 'teacher') { window.location.replace(dashboards[role] || base + 'index.html'); return; }
-        if (isProtectedStudent && role !== 'student') { window.location.replace(dashboards[role] || base + 'index.html'); return; }
+        // classroom.html in /student/ is shared with teacher+admin
+        var isClassroom = path.indexOf('classroom') !== -1;
+        if (isStudent && !isClassroom && role !== 'student') { redirect(dst[role]||base()+'index.html'); return; }
+        if (isStudent &&  isClassroom && role!=='student'&&role!=='teacher'&&role!=='admin') { redirect(base()+'index.html'); return; }
+        if (isTeacher && role !== 'teacher') { redirect(dst[role]||base()+'index.html'); return; }
+        if (isAdmin   && role !== 'admin')   { redirect(dst[role]||base()+'index.html'); return; }
       }
 
-      // All checks passed — reveal the page with smooth fade-in
+      // Passed — reveal
       document.documentElement.style.visibility = 'visible';
-      // After DOM is ready, remove dark overlay
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-          document.body.classList.add('qa-loaded');
-        });
-      } else {
-        document.body.classList.add('qa-loaded');
-      }
+        document.addEventListener('DOMContentLoaded', function(){ document.body.classList.add('qa-loaded'); });
+      } else { document.body.classList.add('qa-loaded'); }
     })();
   </script>
-  <!-- ═══ END ANTI-FLICKER GUARD ═══ -->
+  <!-- ═══ END GUARD ═══ -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>My Dashboard — Quran Academy</title>
   <link rel="stylesheet" href="../css/main.css" />
@@ -88,6 +79,8 @@
         <li class="qa-nav__item"><a href="progress.html"><span class="icon">📈</span> My Progress</a></li>
         <li class="qa-nav__section">Classroom</li>
         <li class="qa-nav__item"><a href="classroom.html"><span class="icon">🎥</span> Join Live Class</a></li>
+        <li class="qa-nav__section">Enrollment</li>
+        <li class="qa-nav__item"><a href="#" onclick="openCourseRequestModal();return false;"><span class="icon">➕</span> Request New Course</a></li>
       </ul>
       <div class="qa-sidebar__user" id="sidebarUser"></div>
       <button class="qa-sidebar__logout" onclick="Auth.logout()">🚪 Sign Out</button>
@@ -274,7 +267,7 @@
         const isLive = timeUntil === 'Starting now!';
         return `
           <div class="qa-class-card">
-            <div class="qa-class-card__time">⏰ ${Utils.utcToLocal(cls.TimeUTC)} (${cls.DurationMins} min)</div>
+            <div class="qa-class-card__time">⏰ ${Utils.formatClassTime(cls.TimeUTC)} (${cls.DurationMins} min)</div>
             <div class="qa-class-card__name">${Utils.sanitize(cls.ClassName)}</div>
             <div class="qa-class-card__meta">📚 ${cls.Subject} · 👨‍🏫 ${cls.TeacherName || 'Teacher'}</div>
             ${isLive || (timeUntil && parseInt(timeUntil) <= 10) ? `
@@ -311,7 +304,7 @@
           ${classes.map(cls => `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:rgba(13,76,76,0.3);border-radius:6px;border-left:2px solid var(--gold-500);margin-bottom:4px;">
               <span style="font-size:0.85rem;font-family:var(--font-ui);">${Utils.sanitize(cls.ClassName)}</span>
-              <span style="font-size:0.75rem;color:var(--teal-200);">${Utils.utcToLocal(cls.TimeUTC)}</span>
+              <span style="font-size:0.75rem;color:var(--teal-200);">${Utils.formatClassTime(cls.TimeUTC)}</span>
             </div>
           `).join('')}
         </div>
@@ -386,10 +379,81 @@
     loadDashboard();
     loadDailyAyah();
     loadPrayerTimes();
+
+    // ── Course Request Modal ──────────────────────────────
+    async function openCourseRequestModal() {
+      document.getElementById('courseRequestModal').style.display = 'flex';
+      try {
+        const [clsRes, enrollRes] = await Promise.all([
+          API.getClasses({ status: 'Active' }),
+          API.getEnrollments({ studentId })
+        ]);
+        const enrolled = new Set((enrollRes.enrollments||[]).map(e => e.ClassID));
+        const available = (clsRes.classes||[]).filter(c => !enrolled.has(c.ClassID));
+        const sel = document.getElementById('reqCourseSelect');
+        sel.innerHTML = '<option value="">Select a course...</option>';
+        if (!available.length) {
+          sel.innerHTML = '<option value="">No new courses available</option>';
+          return;
+        }
+        available.forEach(cls => {
+          const opt = document.createElement('option');
+          opt.value = cls.ClassID;
+          opt.textContent = `${cls.ClassName} — ${cls.Subject} (${Utils.daysDisplay(cls.DaysOfWeek)} at ${Utils.formatClassTime(cls.TimeUTC)})`;
+          sel.appendChild(opt);
+        });
+      } catch(err) { Utils.toast('Could not load courses: ' + err.message, 'error'); }
+    }
+
+    async function submitCourseRequest() {
+      const classId = document.getElementById('reqCourseSelect').value;
+      const note    = document.getElementById('reqCourseNote').value.trim();
+      const errEl   = document.getElementById('reqCourseError');
+      errEl.style.display = 'none';
+      if (!classId) { errEl.textContent = 'Please select a course.'; errEl.style.display = 'block'; return; }
+      try {
+        await Utils.withLoader(() => API.requestEnrollment(studentId, classId, note), 'Sending request...');
+        document.getElementById('courseRequestModal').style.display = 'none';
+        document.getElementById('reqCourseNote').value = '';
+        Utils.toast('✅ Enrollment request sent! Admin will review and approve.', 'success');
+      } catch(err) { errEl.textContent = err.message; errEl.style.display = 'block'; }
+    }
+
+    document.getElementById('courseRequestModal').addEventListener('click', e => {
+      if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
+    });
+
   </script>
 
   <style>
     @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr !important; } }
   </style>
+
+  <!-- ── Request New Course Modal ── -->
+  <div id="courseRequestModal" class="qa-modal-overlay" style="display:none;">
+    <div class="qa-modal" style="max-width:480px;">
+      <div class="qa-modal__title">➕ Request New Course Enrollment</div>
+      <button class="qa-modal__close" onclick="document.getElementById('courseRequestModal').style.display='none'">✕</button>
+      <p style="font-size:0.85rem;color:var(--teal-200);margin-bottom:20px;font-family:var(--font-ui);">
+        Select a course you'd like to join. Your request will be sent to the admin for approval.
+      </p>
+      <div class="qa-form-group">
+        <label class="qa-label">Available Courses<span class="required">*</span></label>
+        <select id="reqCourseSelect" class="qa-select">
+          <option value="">Loading courses...</option>
+        </select>
+      </div>
+      <div class="qa-form-group">
+        <label class="qa-label">Why do you want to join this course?</label>
+        <textarea id="reqCourseNote" class="qa-textarea" style="min-height:80px;"
+          placeholder="e.g. I have completed Qaida and want to start Nazra..."></textarea>
+      </div>
+      <div id="reqCourseError" class="qa-error-msg" style="display:none;margin-bottom:12px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button class="qa-btn qa-btn--primary" onclick="submitCourseRequest()">📨 Send Request</button>
+        <button class="qa-btn qa-btn--outline" onclick="document.getElementById('courseRequestModal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
